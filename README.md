@@ -12,6 +12,8 @@ with AndroidX Media3.
 - Password/region gate integration for CK TV protected sections
 - Remote-friendly catalog, filtering, paging, episode selection, and TV launcher entry
 - Adaptive poster cards and explicit vertical D-pad scrolling/focus
+- Favorites and history screens focus the first saved item when opened, including on high-resolution Android TV layouts
+- Pressing Back/Return on the home screen displays an exit prompt; pressing it again within 2.5 seconds exits the app
 - Search, favorites, playback history, and saved episode/position resume
 - Favorites store title metadata independently of provider IDs and stream URLs
 - Remembers the last provider that reached Media3 `STATE_READY`; reuses its cached
@@ -162,15 +164,15 @@ The script runs `clean`, `assembleDebug`, and `lintDebug`, then renames the
 debug APK using the app version:
 
 ```text
-app\build\outputs\apk\debug\CKTV-Android-TV-v2.0.0.apk
+app\build\outputs\apk\debug\CKTV-Android-TV-v2.1.0.apk
 ```
 
 Current app metadata:
 
 - App label: `CKTV Android TV`
 - Application ID: `com.cktv.android`
-- Version name: `2.0.0`
-- Version code: `11`
+- Version name: `2.1.0`
+- Version code: `12`
 - Minimum Android API: `24`
 - Target / compile SDK: `35`
 

@@ -7,9 +7,10 @@ import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.Gravity;
-import android.view.View;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.content.Context;
@@ -20,6 +21,7 @@ import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.view.ViewGroup;
 
 import androidx.media3.common.util.UnstableApi;
@@ -56,6 +58,7 @@ public class MainActivity extends Activity {
     private int contentRequestId;
     private boolean catalogMode;
     private boolean showingHistory;
+    private long lastBackPressedAt;
     private JSONArray adultSources = new JSONArray();
     private JSONArray adultCategories = new JSONArray();
     private JSONArray huangguoCategories = new JSONArray();
@@ -212,6 +215,19 @@ public class MainActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                long now = SystemClock.elapsedRealtime();
+                if (lastBackPressedAt != 0 && now - lastBackPressedAt <= 2500) {
+                    finish();
+                } else {
+                    lastBackPressedAt = now;
+                    Toast.makeText(this, "再按一次返回鍵即可離開 CKTV",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+            return true;
+        }
         if ((keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP)
                 && isGridFocused()) {
             boolean down = keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
@@ -819,6 +835,12 @@ public class MainActivity extends Activity {
         heading.setText(label);
         replaceItems(values);
         status.setText(values.size() + " 部影片");
+        if (!values.isEmpty()) {
+            grid.post(() -> {
+                grid.setSelection(0);
+                focusFirstItem();
+            });
+        }
     }
 
     private void showSettings() {
@@ -908,7 +930,12 @@ public class MainActivity extends Activity {
 
     private void focusFirstItem() {
         grid.post(() -> {
-            if (grid.getChildCount() > 0) grid.getChildAt(0).requestFocus();
+            grid.setSelection(0);
+            grid.post(() -> {
+                if (grid.getChildCount() > 0 && grid.getFirstVisiblePosition() == 0) {
+                    grid.getChildAt(0).requestFocus();
+                }
+            });
         });
     }
 
