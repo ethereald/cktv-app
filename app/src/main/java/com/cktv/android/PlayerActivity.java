@@ -37,6 +37,7 @@ import org.json.JSONObject;
 public class PlayerActivity extends Activity {
     private static final String TAG = "CKTV-Player";
     private static final long PROGRESS_SAVE_INTERVAL_MS = 5000;
+    private static final long SEEK_INCREMENT_MS = 10_000;
     private final ArrayList<String> playbackUrls = new ArrayList<>();
     private final ArrayList<String> sourceLabels = new ArrayList<>();
     private final ArrayList<String> sourceItems = new ArrayList<>();
@@ -154,8 +155,12 @@ public class PlayerActivity extends Activity {
                 .setDefaultRequestProperties(Collections.unmodifiableMap(requestHeaders));
         player = new ExoPlayer.Builder(this)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSource))
+                .setSeekBackIncrementMs(SEEK_INCREMENT_MS)
+                .setSeekForwardIncrementMs(SEEK_INCREMENT_MS)
                 .build();
         playerView.setPlayer(player);
+        configureTimeBar();
+        showControllerOnTimeBar();
         player.addListener(new Player.Listener() {
             @Override public void onPlayerError(PlaybackException error) {
                 if (attempt != playbackAttempt || isFinishing()) return;
@@ -208,6 +213,29 @@ public class PlayerActivity extends Activity {
         if (resumePositionMs > 0) player.seekTo(resumePositionMs);
         player.prepare();
         player.play();
+    }
+
+    private void configureTimeBar() {
+        View bar = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+        if (bar instanceof androidx.media3.ui.DefaultTimeBar) {
+            ((androidx.media3.ui.DefaultTimeBar) bar).setKeyTimeIncrement(SEEK_INCREMENT_MS);
+        }
+    }
+
+    private void showControllerOnTimeBar() {
+        playerView.showController();
+        playerView.post(() -> {
+            View bar = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+            if (bar != null) bar.requestFocus();
+        });
+    }
+
+    private void seekBy(long deltaMs) {
+        if (player == null) return;
+        long target = Math.max(0, player.getCurrentPosition() + deltaMs);
+        long duration = player.getDuration();
+        if (duration != androidx.media3.common.C.TIME_UNSET) target = Math.min(target, duration);
+        player.seekTo(target);
     }
 
     private void rememberSuccessfulSource(int sourceIndex) {
@@ -398,8 +426,10 @@ public class PlayerActivity extends Activity {
         }
         if (playerView != null && !playerView.isControllerFullyVisible()
                 && isControllerWakeKey(keyCode)) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                playerView.showController();
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) seekBy(-SEEK_INCREMENT_MS);
+                else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) seekBy(SEEK_INCREMENT_MS);
+                if (event.getRepeatCount() == 0) showControllerOnTimeBar();
             }
             return true;
         }

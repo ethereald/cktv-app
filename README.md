@@ -166,15 +166,15 @@ The script runs `clean`, `assembleDebug`, and `lintDebug`, then renames the
 debug APK using the app version:
 
 ```text
-app\build\outputs\apk\debug\CKTV-Android-TV-v2.2.0.apk
+app\build\outputs\apk\debug\CKTV-Android-TV-v2.3.0.apk
 ```
 
 Current app metadata:
 
 - App label: `CKTV Android TV`
 - Application ID: `com.cktv.android`
-- Version name: `2.2.0`
-- Version code: `13`
+- Version name: `2.3.0`
+- Version code: `14`
 - Minimum Android API: `24`
 - Target / compile SDK: `35`
 
