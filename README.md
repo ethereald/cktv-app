@@ -207,6 +207,10 @@ when its gate flow requests authentication. Favorites, history, source
 preferences, and playback progress are stored locally with Android
 `SharedPreferences`.
 
+## Web / iPhone PWA
+
+The [pwa/](pwa/) folder contains an installable, offline-capable web port with the same catalogs, search (scoped to the current section for 18+專區 and AI黃果), favorites, playback history, resume and source failover. The player sits in a 16:9 frame with a separate fullscreen button. Run `npm start` in `pwa/` and see [pwa/README.md](pwa/README.md) for iPhone install steps.
+
 ## License and upstream
 
 This Android app consumes the public CK TV APIs and playback endpoints. The

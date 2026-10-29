@@ -1,0 +1,12 @@
+{
+  "name": "cktv-pwa",
+  "version": "1.0.0",
+  "description": "Offline-capable iPhone/web port of the CKTV Android TV app",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "icons": "node scripts/make-icons.js",
+    "cert": "node scripts/make-cert.js"
+  },
+  "engines": { "node": ">=20" }
+}
