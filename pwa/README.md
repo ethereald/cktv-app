@@ -7,6 +7,14 @@ still comes from the CK TV site online.
 
 ## Run
 
+From the repo root (Windows PowerShell):
+
+```
+.\pwa-service.ps1 start     # also: stop | restart | status
+```
+
+Or manually:
+
 ```
 cd pwa
 npm run cert     # once; self-signed HTTPS cert for localhost + LAN IPs (needs openssl, e.g. Git for Windows)
