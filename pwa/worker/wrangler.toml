@@ -1,0 +1,8 @@
+name = "cktv-gateway"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# The PWA itself is served from the same Worker, so one deploy hosts both app and gateway.
+# Paths that match a file in ../public are served as static assets; everything else (/api, /img, /stream, /site) hits worker.js.
+[assets]
+directory = "../public"

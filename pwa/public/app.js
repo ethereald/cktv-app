@@ -82,6 +82,13 @@ const settings = {
     return (localStorage.getItem('cktv_base_url') || DEFAULT_BASE).trim().replace(/\/+$/, '');
   },
   get password() { return localStorage.getItem('cktv_gate_password') || DEFAULT_PASS; },
+  // Optional remote gateway origin; empty means the origin that served this app.
+  get gateway() { return (localStorage.getItem('cktv_gateway') || '').trim().replace(/\/+$/, ''); },
+  saveGateway(value) {
+    let gateway = str(value).trim().replace(/\/+$/, '');
+    if (gateway && !/^https?:\/\//i.test(gateway)) gateway = 'https://' + gateway;
+    localStorage.setItem('cktv_gateway', gateway);
+  },
   save(base, password) {
     let normalized = str(base).trim().replace(/\/+$/, '') || DEFAULT_BASE;
     if (!/^https?:\/\//i.test(normalized)) normalized = 'https://' + normalized;
@@ -91,12 +98,13 @@ const settings = {
 };
 
 const enc = encodeURIComponent;
+const gw = (path) => settings.gateway + path;
 async function apiGet(path) {
   let response;
   try {
-    response = await fetch(path, { headers: { 'X-CKTV-Base': settings.base, 'X-CKTV-Pass': settings.password } });
+    response = await fetch(gw(path), { headers: { 'X-CKTV-Base': settings.base, 'X-CKTV-Pass': settings.password } });
   } catch (error) {
-    throw new Error(navigator.onLine === false ? '目前離線，無法連線 CKTV。' : '無法連線到 CKTV 本機伺服器。');
+    throw new Error(navigator.onLine === false ? '目前離線，無法連線 CKTV。' : '無法連線到 CKTV 閘道，請在設定中檢查閘道位址。');
   }
   const text = await response.text();
   let json = null;
@@ -145,12 +153,14 @@ function posterSources(poster) {
   const value = str(poster).trim();
   if (!value) return { primary: '', fallback: '' };
   const base = `_base=${enc(settings.base)}`;
-  const join = (u) => u + (u.includes('?') ? '&' : '?') + base;
-  if (value.startsWith('/')) return { primary: join('/site' + value), fallback: settings.base + value };
+  const join = (u) => gw(u + (u.includes('?') ? '&' : '?') + base);
+  // <img> needs no CORS, so images load straight from the remote site like the Android app;
+  // the gateway is only a fallback (e.g. hotlink blocks, self-signed hosts, mixed content).
+  if (value.startsWith('/')) return { primary: settings.base + value, fallback: join('/site' + value) };
   const absolute = value.startsWith('//') ? 'https:' + value : value;
   if (!/^https?:/i.test(absolute)) return { primary: join(`/api/image-proxy?url=${enc(absolute)}`), fallback: '' };
-  // Direct gateway fetch first (handles IP-hosted/self-signed posters), then CK TV's image proxy.
-  return { primary: `/img?url=${enc(absolute)}`, fallback: join(`/api/image-proxy?url=${enc(absolute)}`) };
+  const direct = location.protocol === 'https:' ? absolute.replace(/^http:/i, 'https:') : absolute;
+  return { primary: direct, fallback: gw(`/img?url=${enc(absolute)}`) };
 }
 function setPoster(img, poster) {
   const { primary, fallback } = posterSources(poster);
@@ -585,15 +595,18 @@ function dialog(title, body, buttons) {
 function showSettings() {
   const url = h('input', { type: 'url', value: settings.base, placeholder: 'CK TV address', autocapitalize: 'off', autocorrect: 'off' });
   const pass = h('input', { type: 'password', value: settings.password, placeholder: 'Access password', autocomplete: 'off' });
+  const gateway = h('input', { type: 'url', value: settings.gateway, placeholder: '留空 = 使用提供此 App 的伺服器', autocapitalize: 'off', autocorrect: 'off' });
   const file = h('input', { type: 'file', accept: 'application/json', hidden: true, onchange: () => importLibrary(file) });
   const body = h('div', {},
-    h('label', {}, 'CK TV 位址'), url, h('label', {}, '存取密碼'), pass, h('hr'),
+    h('label', {}, 'CK TV 位址'), url, h('label', {}, '存取密碼'), pass,
+    h('label', {}, '閘道位址（選填，可指向遠端部署）'), gateway, h('hr'),
     h('label', {}, '收藏與播放記錄'),
     h('p', {}, '資料只存在此裝置。可匯出備份，或在另一個裝置匯入。'),
     h('div', { class: 'row', style: 'justify-content:flex-start' },
       h('button', { onclick: exportLibrary }, '匯出'), h('button', { onclick: () => file.click() }, '匯入'), file));
   dialog('連線設定', body, [['取消', () => true], ['儲存', () => {
     settings.save(url.value, pass.value);
+    settings.saveGateway(gateway.value);
     beginCatalog(S.kind, S.label, isDouban());
   }]]);
 }
@@ -837,7 +850,7 @@ function formatPosition(ms) {
 /* ---------- player (PlayerActivity) ---------- */
 function proxiedStream(url) {
   const route = /\.m3u8(\?|$)/i.test(url) ? '/stream.m3u8' : '/stream';
-  return `${route}?url=${enc(url)}&_base=${enc(settings.base)}`;
+  return gw(`${route}?url=${enc(url)}&_base=${enc(settings.base)}`);
 }
 
 function openPlayer(opts) {

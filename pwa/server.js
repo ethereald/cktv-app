@@ -290,6 +290,10 @@ function serveStatic(req, res, url) {
 async function handler(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CKTV-Base, X-CKTV-Pass, Range, Accept');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+    if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Max-Age': '86400' }); return res.end(); }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
     if (url.pathname.startsWith('/api/')) return await relay(req, res, url, url.pathname);
     if (url.pathname.startsWith('/site/')) return await relay(req, res, url, url.pathname.slice(5));

@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = 'cktv-v5';
+const VERSION = 'cktv-v6';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = `${VERSION}-images`;
 const DATA = `${VERSION}-data`;
@@ -60,10 +60,19 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  const sameOrigin = url.origin === self.location.origin;
   if (url.pathname === '/stream' || url.pathname === '/stream.m3u8') return;
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+    if (!sameOrigin) return;
+    // Cache-first so the installed app opens with no server running; refresh in the background.
+    event.respondWith(caches.match('/index.html').then((cached) => {
+      const refresh = fetch(request).then((response) => {
+        if (response.ok) caches.open(SHELL).then((cache) => cache.put('/index.html', response.clone()));
+        return response;
+      });
+      if (cached) { refresh.catch(() => {}); return cached; }
+      return refresh;
+    }));
     return;
   }
   if (url.pathname === '/img' || url.pathname.startsWith('/api/image-proxy') || url.pathname.startsWith('/site/')) {
@@ -74,12 +83,13 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(networkFirst(request));
     return;
   }
-  if (url.pathname.startsWith('/api/')) return;
+  if (!sameOrigin || url.pathname.startsWith('/api/')) return;
   event.respondWith(caches.match(request).then((cached) => {
     const refresh = fetch(request).then((response) => {
       if (response.ok) caches.open(SHELL).then((cache) => cache.put(request, response.clone()));
       return response;
     });
-    return cached || refresh;
+    if (cached) { refresh.catch(() => {}); return cached; }
+    return refresh;
   }));
 });
