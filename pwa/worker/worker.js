@@ -124,7 +124,12 @@ async function stream(request, url) {
   const headers = { 'User-Agent': BROWSER_UA, Referer: base + '/', Origin: base, Accept: '*/*' };
   const range = request.headers.get('range');
   if (range) headers.Range = range;
-  const upstream = await new Session(base).fetch(target, { headers });
+  const session = new Session(base);
+  // AI黃果 playlists are served from the gated CK TV origin itself and need the gate cookie.
+  if (new URL(target).origin === new URL(base).origin) {
+    await session.gate(request.headers.get('x-cktv-pass') || DEFAULT_PASS);
+  }
+  const upstream = await session.fetch(target, { headers });
   const type = upstream.headers.get('content-type') || '';
   if (/mpegurl/i.test(type) || /\.m3u8(\?|$)/i.test(target)) {
     const text = await upstream.text();

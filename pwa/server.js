@@ -199,6 +199,8 @@ async function stream(req, res, url) {
   const { base } = clientContext(req, url);
   const headers = { 'User-Agent': BROWSER_UA, Referer: base + '/', Origin: base, Accept: '*/*' };
   if (req.headers.range) headers.Range = req.headers.range;
+  const targetUrl = await assertPublicUrl(target);
+  if (targetUrl.origin === new URL(base).origin) await ensureGate(base, clientContext(req, url).password);
   const upstream = await safeFetch(target, { headers, timeout: 30000 }, base);
   const type = upstream.headers.get('content-type') || '';
   const isPlaylist = /mpegurl/i.test(type) || /\.m3u8(\?|$)/i.test(target);
