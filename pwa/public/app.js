@@ -156,6 +156,7 @@ function posterSources(poster) {
   const join = (u) => gw(u + (u.includes('?') ? '&' : '?') + base);
   // <img> needs no CORS, so images load straight from the remote site like the Android app;
   // the gateway is only a fallback (e.g. hotlink blocks, self-signed hosts, mixed content).
+  if (value.startsWith('/api/huangguo/')) return { primary: gw(value), fallback: '' };
   if (value.startsWith('/')) return { primary: settings.base + value, fallback: join('/site' + value) };
   const absolute = value.startsWith('//') ? 'https:' + value : value;
   if (!/^https?:/i.test(absolute)) return { primary: join(`/api/image-proxy?url=${enc(absolute)}`), fallback: '' };
@@ -279,9 +280,13 @@ const lib = {
 
 /* ---------- view stack (maps browser/iOS back gestures to screens) ---------- */
 const views = [];
+let replaceNextView = false;
 function pushView(view) {
   views.push(view);
-  history.pushState({ depth: views.length }, '');
+  const state = { depth: views.length };
+  if (replaceNextView) history.replaceState(state, '');
+  else history.pushState(state, '');
+  replaceNextView = false;
 }
 function popViews(depth) {
   while (views.length > depth) {
@@ -333,7 +338,7 @@ function buildHome() {
 }
 
 function defaultSub(kind) {
-  return ({ movie: '全部', anime: 'tv_animation', documentary: 'tv_documentary', variety: 'show', huangguo: 'hot', adult: '' })[kind] || 'tv';
+  return ({ movie: '全部', anime: 'tv_animation', documentary: 'tv_documentary', variety: 'show', huangguo: 'ai-duanju', adult: '' })[kind] || 'tv';
 }
 
 function beginCatalog(kind, label, douban) {
@@ -798,6 +803,12 @@ function openDetail(startItem, resumeFromHistory) {
     let label = item.episodes.length === 1 ? '正片' : `第 ${String(episode + 1).padStart(2, '0')} 集`;
     if (named.includes('$')) label = named.split('$')[0].trim();
     lib.addHistory(item);
+    const onNext = episode + 1 < item.episodes.length ? () => {
+      const view = views.pop();
+      if (view) view.destroy();
+      replaceNextView = true;
+      play(item, episode + 1, 0);
+    } : undefined;
     const candidates = [];
     const add = (url, text, source) => {
       const value = str(url).trim();
@@ -805,9 +816,10 @@ function openDetail(startItem, resumeFromHistory) {
       candidates.push({ url: value, label: text || '其他片源', item: source });
     };
     if (item.source === 'huangguo') {
+      // Episodes point at the gateway's own playlist endpoint, which resolves a fresh signed stream URL.
       const url = episodeUrl(named);
-      add(settings.base + (url.startsWith('/') ? url : '/' + url), sourceLabel(item), item);
-      openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs, searchOnFailure: false, candidates });
+      add(gw(url.startsWith('/') ? url : '/' + url), sourceLabel(item), item);
+      openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs, searchOnFailure: false, candidates, onNext });
       return;
     }
     add(episodeUrl(named), sourceLabel(item), item);
@@ -817,7 +829,7 @@ function openDetail(startItem, resumeFromHistory) {
       add(episodeUrl(candidate.episodes[episode]), sourceLabel(candidate), candidate);
     }
     openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs,
-      searchOnFailure: preferredUsed && !alternateSearched, candidates });
+      searchOnFailure: preferredUsed && !alternateSearched, candidates, onNext });
   }
 
   if (preferredUsed) {
@@ -895,7 +907,7 @@ function openPlayer(opts) {
   const showError = (message) => { errorEl.textContent = message; errorEl.hidden = false; };
 
   const saveProgress = () => {
-    if (opts.live || destroyed) return;
+    if (opts.live || destroyed || video.ended) return;
     const duration = video.duration;
     if (video.readyState < 3 || !Number.isFinite(duration)) return;
     lib.saveProgress(opts.title, opts.episodeIndex, video.currentTime * 1000, duration * 1000);
@@ -964,6 +976,7 @@ function openPlayer(opts) {
       if (myAttempt !== attempt) return;
       clearInterval(saveTimer);
       if (!opts.live) lib.clearProgress(opts.title, opts.episodeIndex);
+      if (opts.onNext) setTimeout(() => { if (!destroyed) opts.onNext(); }, 0);
     };
     stallTimer = setTimeout(() => fail('連線逾時'), STALL_TIMEOUT_MS);
 

@@ -21,8 +21,9 @@ with AndroidX Media3.
 - Remembers the last provider that reached Media3 `STATE_READY`; reuses its cached
   episode list first and searches other matching-title providers after playback fails
 - Manual provider selection remains available
-- Huangguo playback uses CK TV's playlist proxy so signed upstream stream URLs are
-  refreshed and the playlist is returned through CK TV
+- Huangguo is scraped directly from the live site (not through CK TV): the current
+  site routes are read on demand from the `huangguo1.com` address portal, covers
+  are decrypted on-device, and a fresh signed HLS URL is resolved per episode
 - CK TV poster image proxy with direct image fallback
 - Full-screen Media3 playback, HLS detection, request headers, playback diagnostics,
   automatic source failover, and remote-friendly controller behavior
@@ -46,8 +47,12 @@ flowchart TD
     Detail --> Local
     Api --> Gate[CK TV access gate]
     Api --> CKAPI[CK TV catalog/detail/live APIs]
+    Api --> HGS[Huangguo scraper]
+    HGS --> Portal[huangguo1.com route portal]
+    HGS --> HGSite[Huangguo site routes]
     Detail --> Poster[PosterLoader]
     Poster --> ImageProxy[CK TV image proxy]
+    Poster -->|hgimg: covers| HGS
     Detail --> Player[PlayerActivity]
     Player --> Media3[AndroidX Media3 / ExoPlayer]
     Media3 --> HLS[Provider HLS streams]
@@ -98,24 +103,46 @@ sequenceDiagram
 
 ### Huangguo stream flow
 
-Huangguo episode entries are CK TV playlist-proxy paths, not stable direct stream
-URLs. The app makes them absolute against the configured CK TV base URL. CK TV
-then obtains a fresh signed Huangguo URL and returns the playlist through its
-proxy, avoiding direct use of expired or access-restricted signed URLs.
+The Huangguo site changes domains often and CK TV's relay of it broke, so the app
+(`Huangguo.java`) and the PWA gateway (`pwa/huangguo.js`) scrape the site directly.
+The current routes are read on demand from the address portal
+`https://huangguo1.com/`; the last working route is reused (10-minute route cache)
+and every other route, then `huangguoai.com`, is tried when it stops answering.
+List and search pages are parsed from the HTML cards, detail pages from the embedded
+`videoInitialData` JSON. Cover images are served AES-128-CBC encrypted; the key and
+IV are read from the site's `crypto-image-protocol.js` and the images are decrypted
+locally. Episode entries are `hgep:<id>:<n>` references: at play time the episode
+page is fetched again so a fresh signed HLS URL is used, which the player streams
+directly from the CDN.
 
 ```mermaid
 sequenceDiagram
     participant App as Android app / Media3
-    participant CK as CK TV playlist proxy
-    participant HG as Huangguo API and HLS host
-    App->>CK: GET /api/huangguo/media/playlist.m3u8?id=...&ep=...
-    CK->>HG: Request fresh signed play URL
-    HG-->>CK: Short-lived HLS playlist URL
-    CK->>HG: Fetch playlist over upstream connection
-    HG-->>CK: HLS playlist
-    CK-->>App: Playlist with resolved segment URLs
-    App->>HG: Fetch HLS segments
+    participant HG as Huangguo scraper
+    participant Portal as huangguo1.com portal
+    participant Site as Huangguo site route
+    participant CDN as HLS / image CDN
+    App->>HG: List, search, or detail request
+    HG->>Portal: Read current route cards (cached 10 min)
+    Portal-->>HG: Site origins
+    HG->>Site: Fetch page (last good route first, then others)
+    Site-->>HG: HTML cards / videoInitialData
+    HG-->>App: Titles, episodes (hgep:id:n), hgimg: covers
+    App->>HG: Load cover (hgimg:url)
+    HG->>CDN: Download encrypted image
+    HG->>Site: Read AES key and IV from crypto-image-protocol.js
+    HG-->>App: Decrypted JPEG
+    App->>HG: Play episode hgep:id:n
+    HG->>Site: Fetch episode page
+    Site-->>HG: Fresh signed m3u8 URL
+    HG-->>App: Direct HLS URL
+    App->>CDN: Fetch playlist, AES-128 keys, segments
 ```
+
+The PWA gateway exposes the same logic as `/api/huangguo` (list, search, detail),
+`/api/huangguo/image` (decrypted covers) and `/api/huangguo/media/playlist.m3u8`
+(fresh playlist with segment and key URIs rewritten through the stream proxy), and
+the PWA player automatically advances to the next episode when one ends.
 
 ## Project layout
 
@@ -128,6 +155,7 @@ sequenceDiagram
 │       ├── java/com/cktv/android/
 │       │   ├── ApiClient.java       # CK TV HTTP APIs, gate, cookies, parsing
 │       │   ├── DetailActivity.java  # Title details, provider/episode selection
+│       │   ├── Huangguo.java        # AI黃果 scraper: portal routes, parsing, cover decryption
 │       │   ├── LibraryStore.java    # Favorites, history, preferred sources, progress
 │       │   ├── MainActivity.java    # TV catalog, search, filters, D-pad grid
 │       │   ├── MediaItem.java       # Catalog/detail data model
@@ -166,15 +194,15 @@ The script runs `clean`, `assembleDebug`, and `lintDebug`, then renames the
 debug APK using the app version:
 
 ```text
-app\build\outputs\apk\debug\CKTV-Android-TV-v2.3.0.apk
+app\build\outputs\apk\debug\CKTV-Android-TV-v2.4.0.apk
 ```
 
 Current app metadata:
 
 - App label: `CKTV Android TV`
 - Application ID: `com.cktv.android`
-- Version name: `2.3.0`
-- Version code: `14`
+- Version name: `2.4.0`
+- Version code: `15`
 - Minimum Android API: `24`
 - Target / compile SDK: `35`
 
@@ -209,7 +237,7 @@ preferences, and playback progress are stored locally with Android
 
 ## Web / iPhone PWA
 
-The [pwa/](pwa/) folder contains an installable, offline-capable web port with the same catalogs, search (scoped to the current section for 18+專區 and AI黃果), favorites, playback history, resume and source failover. The player sits in a 16:9 frame with a separate fullscreen button. Run `npm start` in `pwa/` and see [pwa/README.md](pwa/README.md) for iPhone install steps.
+The [pwa/](pwa/) folder contains an installable, offline-capable web port with the same catalogs, search (scoped to the current section for 18+專區 and AI黃果), favorites, playback history, resume and source failover. AI黃果 is scraped directly by the gateway (`pwa/huangguo.js`, routes from the huangguo1.com portal) and the player auto-plays the next episode. The player sits in a 16:9 frame with a separate fullscreen button. Run `npm start` in `pwa/` and see [pwa/README.md](pwa/README.md) for iPhone install steps.
 
 ## License and upstream
 

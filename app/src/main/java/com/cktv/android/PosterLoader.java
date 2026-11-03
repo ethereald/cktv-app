@@ -119,8 +119,22 @@ final class PosterLoader {
         return new int[]{Math.max(1, width), Math.max(1, height)};
     }
 
+    private static Bitmap decode(byte[] imageData, int targetWidth, int targetHeight) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(imageData, 0, imageData.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        BitmapFactory.Options decode = new BitmapFactory.Options();
+        decode.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, targetWidth, targetHeight);
+        decode.inPreferredConfig = Bitmap.Config.RGB_565;
+        return BitmapFactory.decodeByteArray(imageData, 0, imageData.length, decode);
+    }
+
     private static Bitmap download(String requestUrl, int targetWidth, int targetHeight)
             throws Exception {
+        if (requestUrl.startsWith(Huangguo.IMAGE_PREFIX)) {
+            return decode(Huangguo.fetchImage(requestUrl), targetWidth, targetHeight);
+        }
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(requestUrl).openConnection();
@@ -151,16 +165,7 @@ final class PosterLoader {
                     }
                     output.write(buffer, 0, count);
                 }
-                byte[] imageData = output.toByteArray();
-                BitmapFactory.Options bounds = new BitmapFactory.Options();
-                bounds.inJustDecodeBounds = true;
-                BitmapFactory.decodeByteArray(imageData, 0, imageData.length, bounds);
-                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
-                BitmapFactory.Options decode = new BitmapFactory.Options();
-                decode.inSampleSize = sampleSize(
-                        bounds.outWidth, bounds.outHeight, targetWidth, targetHeight);
-                decode.inPreferredConfig = Bitmap.Config.RGB_565;
-                return BitmapFactory.decodeByteArray(imageData, 0, imageData.length, decode);
+                return decode(output.toByteArray(), targetWidth, targetHeight);
             }
         } finally {
             if (connection != null) connection.disconnect();

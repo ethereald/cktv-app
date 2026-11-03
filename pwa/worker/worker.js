@@ -1,5 +1,8 @@
 // Cloudflare Worker version of the CKTV gateway (same routes as server.js):
 // /api/*, /site/*, /img, /stream, /stream.m3u8. Deploy it, then put its URL in the app's Settings.
+import huangguoCore from '../huangguo.js';
+
+const { createClient: createHuangguo, MEDIA_PATH, IMAGE_PATH } = huangguoCore;
 const DEFAULT_BASE = 'https://tv.chuankangkk.top';
 const DEFAULT_PASS = 'cknb666';
 const UA = 'CKTV-Android/1.0';
@@ -117,6 +120,45 @@ function rewritePlaylist(text, playlistUrl, base, origin) {
   }).join('\n');
 }
 
+const huangguo = createHuangguo({
+  fetchText: async (target) => {
+    const response = await new Session(target).fetch(target, {
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,*/*', 'Accept-Language': 'zh-CN,zh;q=0.9' },
+    });
+    if (!response.ok) throw new Error(`AI黃果 returned HTTP ${response.status}`);
+    return response.text();
+  },
+  fetchBytes: async (target) => {
+    const response = await new Session(target).fetch(target, { headers: { 'User-Agent': BROWSER_UA, Accept: 'image/*,*/*' } });
+    if (!response.ok) throw new Error(`AI黃果 image unavailable (HTTP ${response.status})`);
+    return new Uint8Array(await response.arrayBuffer());
+  },
+});
+
+async function huangguoApi(url) {
+  const param = (name) => url.searchParams.get(name) || '';
+  if (url.pathname === IMAGE_PATH) {
+    const { bytes, type } = await huangguo.image(param('url'));
+    return new Response(bytes, { headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' } });
+  }
+  if (url.pathname === MEDIA_PATH) {
+    const { url: playlist, origin } = await huangguo.episodeSource(param('id'), param('ep'));
+    const upstream = await new Session(origin).fetch(playlist, {
+      headers: { 'User-Agent': BROWSER_UA, Referer: origin + '/', Origin: origin, Accept: '*/*' },
+    });
+    const text = await upstream.text();
+    if (!upstream.ok || !text.trimStart().startsWith('#EXTM3U')) return json(502, { error: `AI黃果 playlist unavailable (HTTP ${upstream.status})` });
+    return new Response(rewritePlaylist(text, upstream.finalUrl, origin, url.origin), {
+      headers: { ...CORS, 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' },
+    });
+  }
+  const action = param('action');
+  if (action === 'list') return json(200, await huangguo.list(param('t'), param('page')));
+  if (action === 'search') return json(200, await huangguo.search(param('q')));
+  if (action === 'detail') return json(200, await huangguo.detail(param('id')));
+  return json(400, { error: 'Unknown AI黃果 action' });
+}
+
 async function stream(request, url) {
   const target = url.searchParams.get('url');
   if (!target) return json(400, { error: 'Missing url' });
@@ -169,6 +211,7 @@ export default {
     if (request.method !== 'GET' && request.method !== 'HEAD') return json(405, { error: 'method not allowed' });
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/api/huangguo' || url.pathname.startsWith('/api/huangguo/')) return await huangguoApi(url);
       if (url.pathname.startsWith('/api/')) return await relay(request, url, url.pathname);
       if (url.pathname.startsWith('/site/')) return await relay(request, url, url.pathname.slice(5));
       if (url.pathname === '/img') return await image(url);

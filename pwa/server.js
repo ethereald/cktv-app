@@ -10,6 +10,7 @@ const os = require('os');
 const dns = require('dns').promises;
 const net = require('net');
 const { Readable } = require('stream');
+const { createClient: createHuangguo, MEDIA_PATH, IMAGE_PATH } = require('./huangguo');
 
 const ROOT = path.join(__dirname, 'public');
 const CERT_DIR = path.join(__dirname, 'certs');
@@ -193,6 +194,47 @@ function rewritePlaylist(text, playlistUrl, base) {
   }).join('\n');
 }
 
+const huangguo = createHuangguo({
+  fetchText: async (target) => {
+    const response = await safeFetch(target, {
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,*/*', 'Accept-Language': 'zh-CN,zh;q=0.9' },
+      timeout: 15000,
+    });
+    if (!response.ok) throw httpError(502, `AI黃果 returned HTTP ${response.status}`);
+    return response.text();
+  },
+  portals: process.env.HUANGGUO_PORTAL ? process.env.HUANGGUO_PORTAL.split(',') : undefined,
+  fetchBytes: async (target) => {
+    const response = await safeFetch(target, { headers: { 'User-Agent': BROWSER_UA, Accept: 'image/*,*/*' }, timeout: 15000 });
+    if (!response.ok) throw httpError(502, `AI黃果 image unavailable (HTTP ${response.status})`);
+    return new Uint8Array(await response.arrayBuffer());
+  },
+});
+
+async function huangguoApi(res, url) {
+  const param = (name) => url.searchParams.get(name) || '';
+  if (url.pathname === IMAGE_PATH) {
+    const { bytes, type } = await huangguo.image(param('url'));
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' });
+    return res.end(Buffer.from(bytes));
+  }
+  if (url.pathname === MEDIA_PATH) {
+    const { url: playlist, origin } = await huangguo.episodeSource(param('id'), param('ep'));
+    const upstream = await safeFetch(playlist, {
+      headers: { 'User-Agent': BROWSER_UA, Referer: origin + '/', Origin: origin, Accept: '*/*' }, timeout: 20000,
+    });
+    const text = await upstream.text();
+    if (!upstream.ok || !text.trimStart().startsWith('#EXTM3U')) throw httpError(502, `AI黃果 playlist unavailable (HTTP ${upstream.status})`);
+    res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
+    return res.end(rewritePlaylist(text, upstream.finalUrl, origin));
+  }
+  const action = param('action');
+  if (action === 'list') return sendJson(res, 200, await huangguo.list(param('t'), param('page')));
+  if (action === 'search') return sendJson(res, 200, await huangguo.search(param('q')));
+  if (action === 'detail') return sendJson(res, 200, await huangguo.detail(param('id')));
+  throw httpError(400, 'Unknown AI黃果 action');
+}
+
 async function stream(req, res, url) {
   const target = url.searchParams.get('url');
   if (!target) throw httpError(400, 'Missing url');
@@ -297,6 +339,7 @@ async function handler(req, res) {
     res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Max-Age': '86400' }); return res.end(); }
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
+    if (url.pathname === '/api/huangguo' || url.pathname.startsWith('/api/huangguo/')) return await huangguoApi(res, url);
     if (url.pathname.startsWith('/api/')) return await relay(req, res, url, url.pathname);
     if (url.pathname.startsWith('/site/')) return await relay(req, res, url, url.pathname.slice(5));
     if (url.pathname === '/img') return await image(req, res, url);

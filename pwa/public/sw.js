@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = 'cktv-v6';
+const VERSION = 'cktv-v8';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = `${VERSION}-images`;
 const DATA = `${VERSION}-data`;
@@ -61,7 +61,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   const sameOrigin = url.origin === self.location.origin;
-  if (url.pathname === '/stream' || url.pathname === '/stream.m3u8') return;
+  if (url.pathname === '/stream' || url.pathname === '/stream.m3u8' || url.pathname.startsWith('/api/huangguo/media/')) return;
   if (request.mode === 'navigate') {
     if (!sameOrigin) return;
     // Cache-first so the installed app opens with no server running; refresh in the background.
@@ -75,7 +75,7 @@ self.addEventListener('fetch', (event) => {
     }));
     return;
   }
-  if (url.pathname === '/img' || url.pathname.startsWith('/api/image-proxy') || url.pathname.startsWith('/site/')) {
+  if (url.pathname === '/img' || url.pathname.startsWith('/api/image-proxy') || url.pathname.startsWith('/api/huangguo/image') || url.pathname.startsWith('/site/')) {
     event.respondWith(cacheFirstImage(request));
     return;
   }

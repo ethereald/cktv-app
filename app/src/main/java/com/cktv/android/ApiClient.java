@@ -138,13 +138,14 @@ final class ApiClient {
 
     static String imageUrl(Context context, String imageUrl) {
         if (imageUrl == null || imageUrl.trim().isEmpty()) return "";
+        if (imageUrl.startsWith(Huangguo.IMAGE_PREFIX)) return imageUrl;
         if (imageUrl.startsWith("/")) return baseUrl(context) + imageUrl;
         return baseUrl(context) + "/api/image-proxy?url=" + encode(imageUrl.trim());
     }
 
     static void detail(Context context, String source, String id, Callback<JSONObject> callback) {
         if ("huangguo".equals(source)) {
-            get(context, "/api/huangguo?action=detail&id=" + encode(id), json -> json, callback);
+            background(() -> Huangguo.detail(id), callback);
             return;
         }
         get(context, "/api/detail?source=" + encode(source) + "&id=" + encode(id), json -> json, callback);
@@ -161,8 +162,27 @@ final class ApiClient {
 
     static void huangguoCatalog(Context context, String category, int page,
                                 Callback<JSONObject> callback) {
-        get(context, "/api/huangguo?action=list&t=" + encode(category) + "&page=" + page,
-                json -> json, callback);
+        background(() -> Huangguo.list(category, page), callback);
+    }
+
+    static void huangguoEpisode(String reference, Callback<String> callback) {
+        background(() -> Huangguo.episodeSource(reference), callback);
+    }
+
+    interface Work<T> {
+        T run() throws Exception;
+    }
+
+    static <T> void background(Work<T> work, Callback<T> callback) {
+        EXECUTOR.execute(() -> {
+            try {
+                T value = work.run();
+                MAIN.post(() -> callback.onSuccess(value));
+            } catch (Exception error) {
+                String message = error.getMessage() == null ? error.toString() : error.getMessage();
+                MAIN.post(() -> callback.onError(message));
+            }
+        });
     }
 
     static void live(Context context, String id, Callback<JSONObject> callback) {

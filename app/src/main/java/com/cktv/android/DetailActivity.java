@@ -387,14 +387,26 @@ public class DetailActivity extends Activity {
         }
         LibraryStore.addHistory(this, item);
         if ("huangguo".equals(item.source)) {
-            ArrayList<String> urls = new ArrayList<>();
-            ArrayList<String> labels = new ArrayList<>();
-            ArrayList<String> sourceItems = new ArrayList<>();
-            urls.add(ApiClient.baseUrl(this) + (url.startsWith("/") ? url : "/" + url));
-            labels.add(sourceLabel(item));
-            sourceItems.add(item.toJson().toString());
-            launchPlayer(item, episodeLabel, urls, labels, sourceItems, episode,
-                    resumePositionMs, false);
+            final String label = episodeLabel;
+            ApiClient.huangguoEpisode(url, new ApiClient.Callback<String>() {
+                @Override public void onSuccess(String direct) {
+                    if (isFinishing() || isDestroyed()) return;
+                    ArrayList<String> urls = new ArrayList<>();
+                    ArrayList<String> labels = new ArrayList<>();
+                    ArrayList<String> sourceItems = new ArrayList<>();
+                    urls.add(direct);
+                    labels.add(sourceLabel(item));
+                    sourceItems.add(item.toJson().toString());
+                    launchPlayer(item, label, urls, labels, sourceItems, episode,
+                            resumePositionMs, false);
+                }
+
+                @Override public void onError(String message) {
+                    if (isFinishing() || isDestroyed()) return;
+                    Toast.makeText(DetailActivity.this, "黃果播放失敗：" + message,
+                            Toast.LENGTH_LONG).show();
+                }
+            });
             return;
         }
         ArrayList<String> urls = new ArrayList<>();
