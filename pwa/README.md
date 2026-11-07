@@ -39,7 +39,9 @@ If the LAN IP changes, run `npm run cert` again and reinstall the profile.
   self-signed IP hosts). Private/LAN targets are blocked.
 - Settings > Export/Import moves favorites and history between devices.
 - Search is scoped to the current section in 18+專區 and AI黃果; other sections search all sources.
-- AI黃果 is scraped by the gateway itself ([huangguo.js](huangguo.js)), not through CK TV. Current site routes are read on demand from the address portal (`https://huangguo1.com/`, override with `HUANGGUO_PORTAL`), the last working route is reused, and the portal is re-read when every route fails. Android still uses CK TV's `/api/huangguo`.
+- AI黃果 is scraped by the gateway itself ([huangguo.js](huangguo.js)), not through CK TV. Current site routes are read on demand from the address portal (`https://huangguo1.com/`, override with `HUANGGUO_PORTAL`), the last working route is reused, and the portal is re-read when every route fails. Catalogs use the site's paginated popularity ranking. Android scrapes the site directly as well.
+- If playback fails, the player searches CK TV for matching titles and tries the same episode from other available providers.
+- After updating the gateway, restart the PWA service so it loads the new playback code.
 - Android/TV-only parts (D-pad focus, exit prompt, live-platform external intents) are replaced by touch and the browser/PWA back gesture.
 
 ## Running without localhost
@@ -60,4 +62,3 @@ Note: Settings are stored per install, so set the gateway again after adding the
 One-time setup in GitHub > repo Settings > Secrets and variables > Actions:
 - `CLOUDFLARE_API_TOKEN`: Cloudflare dashboard > My Profile > API Tokens > Create Token > template *Edit Cloudflare Workers*.
 - `CLOUDFLARE_ACCOUNT_ID`: shown on the Workers & Pages overview page.
-

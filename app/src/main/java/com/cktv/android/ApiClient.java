@@ -165,7 +165,7 @@ final class ApiClient {
         background(() -> Huangguo.list(category, page), callback);
     }
 
-    static void huangguoEpisode(String reference, Callback<String> callback) {
+    static void huangguoEpisode(String reference, Callback<Huangguo.EpisodeSource> callback) {
         background(() -> Huangguo.episodeSource(reference), callback);
     }
 

@@ -38,6 +38,7 @@ public class PlayerActivity extends Activity {
     private static final String TAG = "CKTV-Player";
     private static final long PROGRESS_SAVE_INTERVAL_MS = 5000;
     private static final long SEEK_INCREMENT_MS = 10_000;
+    private static final long BUFFER_TIMEOUT_MS = 45000;
     private final ArrayList<String> playbackUrls = new ArrayList<>();
     private final ArrayList<String> sourceLabels = new ArrayList<>();
     private final ArrayList<String> sourceItems = new ArrayList<>();
@@ -45,6 +46,7 @@ public class PlayerActivity extends Activity {
     private final Set<String> attemptedProviders = new HashSet<>();
     private final ArrayList<MediaItem> fallbackCandidates = new ArrayList<>();
     private final Handler progressHandler = new Handler(Looper.getMainLooper());
+    private final Handler bufferHandler = new Handler(Looper.getMainLooper());
     private final Runnable progressSaver = new Runnable() {
         @Override public void run() {
             savePlaybackProgress();
@@ -135,18 +137,45 @@ public class PlayerActivity extends Activity {
     }
 
     private void startPlayback(int sourceIndex) {
+        startPlayback(sourceIndex, null);
+    }
+
+    private void startPlayback(int sourceIndex, Huangguo.EpisodeSource resolved) {
         int attempt = ++playbackAttempt;
+        bufferHandler.removeCallbacksAndMessages(null);
         String url = playbackUrls.get(sourceIndex);
         if (player != null) {
             player.release();
             player = null;
         }
-        String siteOrigin = ApiClient.baseUrl(this);
+        if (url.startsWith(Huangguo.EPISODE_PREFIX)) {
+            showError("正在載入黃果影片…");
+            ApiClient.huangguoEpisode(url, new ApiClient.Callback<Huangguo.EpisodeSource>() {
+                @Override public void onSuccess(Huangguo.EpisodeSource direct) {
+                    if (attempt != playbackAttempt || isFinishing() || isDestroyed()) return;
+                    playbackUrls.set(sourceIndex, direct.url);
+                    startPlayback(sourceIndex, direct);
+                }
+
+                @Override public void onError(String message) {
+                    if (attempt != playbackAttempt || isFinishing() || isDestroyed()) return;
+                    Log.w(TAG, "Huangguo episode resolution failed: " + message);
+                    handlePlaybackFailure(sourceIndex, "黃果播放失敗：" + message);
+                }
+            });
+            return;
+        }
+        String siteOrigin = resolved == null ? ApiClient.baseUrl(this) : resolved.origin;
         // Match the cross-origin request headers sent by CK TV's browser HLS player.
         Map<String, String> requestHeaders = new HashMap<>();
         requestHeaders.put("Referer", siteOrigin + "/");
         requestHeaders.put("Origin", siteOrigin);
         requestHeaders.put("Accept", "*/*");
+        if (resolved != null && !resolved.authKey.isEmpty()
+                && !resolved.authValue.isEmpty() && !resolved.app.isEmpty()) {
+            requestHeaders.put(resolved.authKey, resolved.authValue);
+            requestHeaders.put("x-cdn-app", resolved.app);
+        }
         DefaultHttpDataSource.Factory dataSource = new DefaultHttpDataSource.Factory()
                 .setUserAgent("Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
                 .setConnectTimeoutMs(15000)
@@ -164,29 +193,24 @@ public class PlayerActivity extends Activity {
         player.addListener(new Player.Listener() {
             @Override public void onPlayerError(PlaybackException error) {
                 if (attempt != playbackAttempt || isFinishing()) return;
-                lastPlaybackFailure = playbackFailure(error, url);
-                Log.e(TAG, lastPlaybackFailure, error);
-                markFailedSource(sourceIndex);
-                if (sourceIndex + 1 < playbackUrls.size()) {
-                    int nextIndex = sourceIndex + 1;
-                    showError("片源「" + sourceLabel(sourceIndex)
-                            + "」連線失敗，正在自動嘗試片源 "
-                            + (nextIndex + 1) + "/" + playbackUrls.size()
-                            + "：「" + sourceLabel(nextIndex) + "」…");
-                    startPlayback(nextIndex);
-                } else if (sourceIndex < fallbackIndexes.size()
-                        && fallbackIndexes.get(sourceIndex) >= 0) {
-                    tryFallbackCandidate(fallbackIndexes.get(sourceIndex) + 1);
-                } else if (fallbackSearchEnabled && !fallbackSearchStarted) {
-                    searchFallbackSources();
-                } else {
-                    showError(lastPlaybackFailure + "\n已自動嘗試 "
-                            + playbackUrls.size()
-                            + " 個片源，請返回詳情手動選擇其他片源。");
-                }
+                String failure = playbackFailure(error, url);
+                Log.e(TAG, failure, error);
+                handlePlaybackFailure(sourceIndex, failure);
             }
 
             @Override public void onPlaybackStateChanged(int playbackState) {
+                if (attempt != playbackAttempt) return;
+                bufferHandler.removeCallbacksAndMessages(null);
+                if (playbackState == Player.STATE_BUFFERING) {
+                    bufferHandler.postDelayed(() -> {
+                        if (attempt == playbackAttempt && player != null
+                                && player.getPlaybackState() == Player.STATE_BUFFERING
+                                && player.getPlayWhenReady()) {
+                            Log.w(TAG, "Playback buffering timed out.");
+                            handlePlaybackFailure(sourceIndex, "播放失敗：連線逾時");
+                        }
+                    }, BUFFER_TIMEOUT_MS);
+                }
                 if (attempt == playbackAttempt && playbackState == Player.STATE_READY) {
                     errorView.setVisibility(View.GONE);
                     rememberSuccessfulSource(sourceIndex);
@@ -213,6 +237,29 @@ public class PlayerActivity extends Activity {
         if (resumePositionMs > 0) player.seekTo(resumePositionMs);
         player.prepare();
         player.play();
+    }
+
+    private void handlePlaybackFailure(int sourceIndex, String failure) {
+        playbackAttempt++;
+        bufferHandler.removeCallbacksAndMessages(null);
+        lastPlaybackFailure = failure;
+        markFailedSource(sourceIndex);
+        if (sourceIndex + 1 < playbackUrls.size()) {
+            int nextIndex = sourceIndex + 1;
+            showError("片源「" + sourceLabel(sourceIndex)
+                    + "」連線失敗，正在自動嘗試片源 "
+                    + (nextIndex + 1) + "/" + playbackUrls.size()
+                    + "：「" + sourceLabel(nextIndex) + "」…");
+            startPlayback(nextIndex);
+        } else if (sourceIndex < fallbackIndexes.size()
+                && fallbackIndexes.get(sourceIndex) >= 0) {
+            tryFallbackCandidate(fallbackIndexes.get(sourceIndex) + 1);
+        } else if (fallbackSearchEnabled && !fallbackSearchStarted) {
+            searchFallbackSources();
+        } else {
+            showError(lastPlaybackFailure + "\n已自動嘗試 "
+                    + playbackUrls.size() + " 個片源，請返回詳情手動選擇其他片源。");
+        }
     }
 
     private void configureTimeBar() {
@@ -272,9 +319,11 @@ public class PlayerActivity extends Activity {
 
     private void searchFallbackSources() {
         fallbackSearchStarted = true;
-        showError("上次使用的片源無法播放，正在搜尋其他片源…");
+        int searchAttempt = playbackAttempt;
+        showError("目前片源無法播放，正在搜尋其他片源…");
         ApiClient.search(this, fallbackTitle, new ApiClient.Callback<JSONArray>() {
             @Override public void onSuccess(JSONArray values) {
+                if (searchAttempt != playbackAttempt || isFinishing() || isDestroyed()) return;
                 String titleKey = normalizeTitle(fallbackTitle);
                 for (int i = 0; i < values.length(); i++) {
                     JSONObject value = values.optJSONObject(i);
@@ -296,7 +345,7 @@ public class PlayerActivity extends Activity {
             }
 
             @Override public void onError(String message) {
-                if (!isFinishing()) {
+                if (searchAttempt == playbackAttempt && !isFinishing() && !isDestroyed()) {
                     showError(lastPlaybackFailure + "\n搜尋其他片源失敗：" + message
                             + "\n請返回詳情手動搜尋片源。");
                 }
@@ -317,10 +366,11 @@ public class PlayerActivity extends Activity {
             appendAndPlay(resolved, candidateIndex);
             return;
         }
+        int detailAttempt = playbackAttempt;
         ApiClient.detail(this, candidate.source, candidate.id,
                 new ApiClient.Callback<JSONObject>() {
                     @Override public void onSuccess(JSONObject value) {
-                        if (isFinishing()) return;
+                        if (detailAttempt != playbackAttempt || isFinishing() || isDestroyed()) return;
                         MediaItem detail = MediaItem.fromJson(value);
                         MediaItem resolved = withEpisodeMetadata(detail, candidateIndex);
                         if (fallbackEpisodeIndex >= 0
@@ -332,7 +382,9 @@ public class PlayerActivity extends Activity {
                     }
 
                     @Override public void onError(String message) {
-                        if (!isFinishing()) tryFallbackCandidate(candidateIndex + 1);
+                        if (detailAttempt == playbackAttempt && !isFinishing() && !isDestroyed()) {
+                            tryFallbackCandidate(candidateIndex + 1);
+                        }
                     }
                 });
     }
@@ -459,6 +511,8 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        playbackAttempt++;
+        bufferHandler.removeCallbacksAndMessages(null);
         progressHandler.removeCallbacks(progressSaver);
         if (player != null) {
             savePlaybackProgress();

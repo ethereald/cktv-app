@@ -42,7 +42,6 @@ public class DetailActivity extends Activity {
     private Button continueButton;
     private int detailRequestId;
     private boolean preferredSourceUsed;
-    private boolean alternateSourcesSearched;
     private boolean resumeFromHistory;
     private boolean historyResumeStarted;
 
@@ -146,7 +145,6 @@ public class DetailActivity extends Activity {
         searchOtherSourcesButton = TvUi.button(this, "搜尋其他片源");
         searchOtherSourcesButton.setVisibility(View.GONE);
         searchOtherSourcesButton.setOnClickListener(view -> {
-            alternateSourcesSearched = true;
             searchOtherSourcesButton.setEnabled(false);
             searchOtherSourcesButton.setText("正在搜尋其他片源…");
             loadAlternateSources(selectedItem);
@@ -386,29 +384,6 @@ public class DetailActivity extends Activity {
             episodeLabel = namedEpisode.split("\\$", 2)[0].trim();
         }
         LibraryStore.addHistory(this, item);
-        if ("huangguo".equals(item.source)) {
-            final String label = episodeLabel;
-            ApiClient.huangguoEpisode(url, new ApiClient.Callback<String>() {
-                @Override public void onSuccess(String direct) {
-                    if (isFinishing() || isDestroyed()) return;
-                    ArrayList<String> urls = new ArrayList<>();
-                    ArrayList<String> labels = new ArrayList<>();
-                    ArrayList<String> sourceItems = new ArrayList<>();
-                    urls.add(direct);
-                    labels.add(sourceLabel(item));
-                    sourceItems.add(item.toJson().toString());
-                    launchPlayer(item, label, urls, labels, sourceItems, episode,
-                            resumePositionMs, false);
-                }
-
-                @Override public void onError(String message) {
-                    if (isFinishing() || isDestroyed()) return;
-                    Toast.makeText(DetailActivity.this, "黃果播放失敗：" + message,
-                            Toast.LENGTH_LONG).show();
-                }
-            });
-            return;
-        }
         ArrayList<String> urls = new ArrayList<>();
         ArrayList<String> labels = new ArrayList<>();
         ArrayList<String> sourceItems = new ArrayList<>();
@@ -425,8 +400,7 @@ public class DetailActivity extends Activity {
                     sourceLabel(candidate), candidate);
         }
         launchPlayer(item, episodeLabel, urls, labels, sourceItems, episode,
-                resumePositionMs,
-                preferredSourceUsed && !alternateSourcesSearched);
+                resumePositionMs, true);
     }
 
     private static String episodeUrl(String episode) {

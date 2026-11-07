@@ -643,7 +643,6 @@ function openDetail(startItem, resumeFromHistory) {
   const sources = [];
   let requestId = 0;
   let preferredUsed = false;
-  let alternateSearched = false;
   let historyResumeStarted = false;
   let destroyed = false;
 
@@ -662,7 +661,6 @@ function openDetail(startItem, resumeFromHistory) {
   const sourceStatus = h('div', { class: 'muted' }, '正在尋找可播放片源…');
   const sourceRow = h('div', { class: 'row' });
   const otherBtn = h('button', { hidden: true, onclick: () => {
-    alternateSearched = true;
     otherBtn.disabled = true;
     otherBtn.textContent = '正在搜尋其他片源…';
     loadAlternateSources(selected);
@@ -819,7 +817,7 @@ function openDetail(startItem, resumeFromHistory) {
       // Episodes point at the gateway's own playlist endpoint, which resolves a fresh signed stream URL.
       const url = episodeUrl(named);
       add(gw(url.startsWith('/') ? url : '/' + url), sourceLabel(item), item);
-      openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs, searchOnFailure: false, candidates, onNext });
+      openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs, searchOnFailure: true, candidates, onNext });
       return;
     }
     add(episodeUrl(named), sourceLabel(item), item);
@@ -829,7 +827,7 @@ function openDetail(startItem, resumeFromHistory) {
       add(episodeUrl(candidate.episodes[episode]), sourceLabel(candidate), candidate);
     }
     openPlayer({ title: item.title, episodeLabel: label, episodeIndex: episode, resumeMs,
-      searchOnFailure: preferredUsed && !alternateSearched, candidates, onNext });
+      searchOnFailure: true, candidates, onNext });
   }
 
   if (preferredUsed) {
@@ -905,6 +903,7 @@ function openPlayer(opts) {
   }
 
   const showError = (message) => { errorEl.textContent = message; errorEl.hidden = false; };
+  showError('正在載入影片…');
 
   const saveProgress = () => {
     if (opts.live || destroyed || video.ended) return;
@@ -941,6 +940,7 @@ function openPlayer(opts) {
         startPlayback(index, true);
         return;
       }
+      attempt++;
       lastFailure = `播放失敗：${reason}\n請檢查網路，或從影片詳情更換片源。`;
       markFailed(index);
       if (index + 1 < cands.length) {
@@ -956,9 +956,10 @@ function openPlayer(opts) {
     };
 
     const onReady = () => {
-      if (myAttempt !== attempt || ready) return;
-      ready = true;
+      if (myAttempt !== attempt) return;
       clearTimeout(stallTimer);
+      if (ready) return;
+      ready = true;
       errorEl.hidden = true;
       rememberSource(index);
       if (resumeMs <= 0 && !opts.live) lib.clearProgress(opts.title, opts.episodeIndex);
@@ -971,6 +972,11 @@ function openPlayer(opts) {
     };
     video.oncanplay = onReady;
     video.onplaying = onReady;
+    video.onwaiting = () => {
+      if (myAttempt !== attempt || video.paused) return;
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => fail('連線逾時'), STALL_TIMEOUT_MS);
+    };
     video.onerror = () => fail(video.error ? `MEDIA_ERR_${video.error.code}` : '未知錯誤');
     video.onended = () => {
       if (myAttempt !== attempt) return;
@@ -1000,7 +1006,7 @@ function openPlayer(opts) {
 
   async function searchFallbackSources() {
     searchStarted = true;
-    showError('上次使用的片源無法播放，正在搜尋其他片源…');
+    showError('目前片源無法播放，正在搜尋其他片源…');
     try {
       const values = parseMedia(await api.search(opts.title));
       if (destroyed) return;

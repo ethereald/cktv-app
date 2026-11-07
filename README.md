@@ -23,7 +23,11 @@ with AndroidX Media3.
 - Manual provider selection remains available
 - Huangguo is scraped directly from the live site (not through CK TV): the current
   site routes are read on demand from the `huangguo1.com` address portal, covers
-  are decrypted on-device, and a fresh signed HLS URL is resolved per episode
+  are decrypted on-device, a fresh signed HLS URL is resolved per episode through
+  the site's playback API when it is not embedded in the page, and
+  catalogs default to the site's paginated popularity ranking
+- If stream resolution or playback fails, the player searches for exact-title
+  alternatives and tries the corresponding episode when available
 - CK TV poster image proxy with direct image fallback
 - Full-screen Media3 playback, HLS detection, request headers, playback diagnostics,
   automatic source failover, and remote-friendly controller behavior
@@ -194,15 +198,15 @@ The script runs `clean`, `assembleDebug`, and `lintDebug`, then renames the
 debug APK using the app version:
 
 ```text
-app\build\outputs\apk\debug\CKTV-Android-TV-v2.4.0.apk
+app\build\outputs\apk\debug\CKTV-Android-TV-v2.4.1.apk
 ```
 
 Current app metadata:
 
 - App label: `CKTV Android TV`
 - Application ID: `com.cktv.android`
-- Version name: `2.4.0`
-- Version code: `15`
+- Version name: `2.4.1`
+- Version code: `16`
 - Minimum Android API: `24`
 - Target / compile SDK: `35`
 

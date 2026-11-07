@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = 'cktv-v8';
+const VERSION = 'cktv-v10';
 const SHELL = `${VERSION}-shell`;
 const IMAGES = `${VERSION}-images`;
 const DATA = `${VERSION}-data`;

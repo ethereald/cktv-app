@@ -144,7 +144,7 @@ function createClient({ fetchText, fetchBytes, portals = PORTALS, fallbacks = FA
   }
 
   // Tries the last working origin, then every route; if all fail, re-reads the portal once.
-  async function get(path, validate) {
+  async function get(path, validate, options) {
     const tried = new Set();
     let failure = new Error('AI黃果 is unreachable');
     for (const refresh of [false, true]) {
@@ -152,7 +152,7 @@ function createClient({ fetchText, fetchBytes, portals = PORTALS, fallbacks = FA
         if (tried.has(origin)) continue;
         tried.add(origin);
         try {
-          const html = await fetchText(origin + path);
+          const html = await fetchText(origin + path, options);
           if (validate(html)) { good = origin; return { html, origin }; }
           failure = new Error('AI黃果 returned an unexpected page');
         } catch (error) { failure = error; }
@@ -194,17 +194,31 @@ function createClient({ fetchText, fetchBytes, portals = PORTALS, fallbacks = FA
       const current = Math.max(1, Math.floor(Number(page)) || 1);
       let wanted = /^[a-z0-9-]+$/.test(category || '') ? category : '';
       if (wanted && knownCategories.length && !knownCategories.includes(wanted)) wanted = '';
-      const load = (id) => get(categoryPath(id, current), hasCards);
+      const load = (id) => get(categoryPath(id, 1), hasCards);
       let result;
+      let selected = wanted || knownCategories[0] || DEFAULT_CATEGORY;
       try {
-        result = await load(wanted || knownCategories[0] || DEFAULT_CATEGORY);
+        result = await load(selected);
       } catch (error) {
         if (!wanted || wanted === DEFAULT_CATEGORY) throw error;
+        selected = DEFAULT_CATEGORY;
         result = await load(DEFAULT_CATEGORY);
       }
       const categories = parseCategories(result.html);
       if (categories.length) knownCategories = categories.map((c) => c.id);
-      return { list: parseCards(result.html, result.origin), page: current, pagecount: parsePageCount(result.html), categories };
+      const hot = await get(`/api/videos/category/${selected}?sort=hot_window&page=${current}&size=21`, (html) => {
+        try {
+          const data = JSON.parse(html).data;
+          return !!data && Array.isArray(data.items) && !!data.pagination;
+        } catch (error) { return false; }
+      });
+      const data = JSON.parse(hot.html).data;
+      const list = data.items.map((item) => ({
+        id: String(item.id), title: String(item.title || ''), poster: imageUrl(absolute(item.cover, hot.origin)),
+        year: '', rate: item.score == null ? '' : String(item.score), source: SOURCE, source_name: SOURCE_NAME,
+        desc: String(item.description || ''), remarks: item.episode_count ? `更新至${item.episode_count}集` : '', episodes: [],
+      }));
+      return { list, page: current, pagecount: Number(data.pagination.pages) || 1, categories };
     },
     async search(query) {
       const { html, origin } = await get(`/search/?keyword=${encodeURIComponent(String(query || '').trim())}`, (h) => h.includes('hg-layout'));
@@ -225,8 +239,22 @@ function createClient({ fetchText, fetchBytes, portals = PORTALS, fallbacks = FA
       const page = number > 1 ? `/video/${id}/ep-${number}/` : `/video/${id}/`;
       const { html, origin } = await get(page, (h) => h.includes('id="videoInitialData"'));
       const url = (parseVideoData(html).epPlaySrcs || {})[String(number)];
-      if (!url) throw new Error('Episode not found');
-      return { url, origin };
+      if (url) return { url, origin, headers: {} };
+      const playback = await get(`/api/videos/${id}/episodes/${number}/playback`, (body) => {
+        try {
+          const response = JSON.parse(body);
+          return response.status === 1 && response.data && response.data.manifest_method === 'GET'
+            && typeof response.data.streams?.main === 'string' && !!response.data.streams.main;
+        } catch (error) { return false; }
+      }, { method: 'POST', body: '{}' });
+      const data = JSON.parse(playback.html).data;
+      const cdn = data.cdn || {};
+      const headers = {};
+      if (cdn.m3u8Enabled && cdn.authKey && cdn.authValue && cdn.app) {
+        headers[cdn.authKey] = cdn.authValue;
+        headers['x-cdn-app'] = cdn.app;
+      }
+      return { url: data.streams.main, origin: playback.origin, headers };
     },
   };
 }

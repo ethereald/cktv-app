@@ -195,9 +195,11 @@ function rewritePlaylist(text, playlistUrl, base) {
 }
 
 const huangguo = createHuangguo({
-  fetchText: async (target) => {
+  fetchText: async (target, options = {}) => {
     const response = await safeFetch(target, {
-      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,*/*', 'Accept-Language': 'zh-CN,zh;q=0.9' },
+      method: options.method, body: options.body,
+      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,*/*', 'Accept-Language': 'zh-CN,zh;q=0.9',
+        ...(options.method === 'POST' ? { 'Content-Type': 'application/json', Origin: new URL(target).origin, Referer: new URL(target).origin + '/' } : {}) },
       timeout: 15000,
     });
     if (!response.ok) throw httpError(502, `AI黃果 returned HTTP ${response.status}`);
@@ -219,9 +221,9 @@ async function huangguoApi(res, url) {
     return res.end(Buffer.from(bytes));
   }
   if (url.pathname === MEDIA_PATH) {
-    const { url: playlist, origin } = await huangguo.episodeSource(param('id'), param('ep'));
+    const { url: playlist, origin, headers } = await huangguo.episodeSource(param('id'), param('ep'));
     const upstream = await safeFetch(playlist, {
-      headers: { 'User-Agent': BROWSER_UA, Referer: origin + '/', Origin: origin, Accept: '*/*' }, timeout: 20000,
+      headers: { 'User-Agent': BROWSER_UA, Referer: origin + '/', Origin: origin, Accept: '*/*', ...headers }, timeout: 20000,
     });
     const text = await upstream.text();
     if (!upstream.ok || !text.trimStart().startsWith('#EXTM3U')) throw httpError(502, `AI黃果 playlist unavailable (HTTP ${upstream.status})`);

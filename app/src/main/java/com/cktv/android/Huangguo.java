@@ -70,6 +70,22 @@ final class Huangguo {
         }
     }
 
+    static final class EpisodeSource {
+            final String url;
+            final String origin;
+            final String authKey;
+            final String authValue;
+            final String app;
+
+            EpisodeSource(String url, String origin, String authKey, String authValue, String app) {
+                this.url = url;
+                this.origin = origin;
+                this.authKey = authKey;
+                this.authValue = authValue;
+                this.app = app;
+        }
+    }
+
     static JSONObject list(String category, int page) throws Exception {
         int current = Math.max(1, page);
         String wanted = category != null && category.matches("[a-z0-9-]+") ? category : "";
@@ -81,10 +97,11 @@ final class Huangguo {
         String first = !wanted.isEmpty() ? wanted : known.isEmpty() ? DEFAULT_CATEGORY : known.get(0);
         Page result;
         try {
-            result = get(categoryPath(first, current), html -> html.contains("hg-drama-card"));
+            result = get(categoryPath(first, 1), html -> html.contains("hg-drama-card"));
         } catch (IOException error) {
             if (wanted.isEmpty() || DEFAULT_CATEGORY.equals(wanted)) throw error;
-            result = get(categoryPath(DEFAULT_CATEGORY, current), html -> html.contains("hg-drama-card"));
+            first = DEFAULT_CATEGORY;
+            result = get(categoryPath(first, 1), html -> html.contains("hg-drama-card"));
         }
         JSONArray categories = parseCategories(result.html);
         if (categories.length() > 0) {
@@ -94,10 +111,38 @@ final class Huangguo {
                 knownCategories = ids;
             }
         }
+        Page hot = get("/api/videos/category/" + first + "?sort=hot_window&page="
+                + current + "&size=21", html -> {
+            try {
+                JSONObject data = new JSONObject(html).optJSONObject("data");
+                return data != null && data.optJSONArray("items") != null
+                        && data.optJSONObject("pagination") != null;
+            } catch (org.json.JSONException error) {
+                return false;
+            }
+        });
+        JSONObject data = new JSONObject(hot.html).getJSONObject("data");
+        JSONArray items = data.getJSONArray("items");
+        JSONArray list = new JSONArray();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.getJSONObject(i);
+            int episodes = item.optInt("episode_count", 0);
+            list.put(new JSONObject()
+                    .put("id", item.optString("id", ""))
+                    .put("title", item.optString("title", ""))
+                    .put("poster", imageRef(absolute(item.optString("cover", ""), hot.origin)))
+                    .put("year", "")
+                    .put("rate", item.isNull("score") ? "" : item.optString("score", ""))
+                    .put("source", "huangguo")
+                    .put("source_name", "黃果")
+                    .put("desc", item.optString("description", ""))
+                    .put("remarks", episodes > 0 ? "更新至" + episodes + "集" : "")
+                    .put("episodes", new JSONArray()));
+        }
         return new JSONObject()
-                .put("list", parseCards(result.html, result.origin))
+                .put("list", list)
                 .put("page", current)
-                .put("pagecount", parsePageCount(result.html))
+                .put("pagecount", Math.max(1, data.getJSONObject("pagination").optInt("pages", 1)))
                 .put("categories", categories);
     }
 
@@ -129,7 +174,7 @@ final class Huangguo {
     }
 
     /** Resolves a fresh signed HLS playlist URL for an {@code hgep:ID:N} episode reference. */
-    static String episodeSource(String reference) throws Exception {
+    static EpisodeSource episodeSource(String reference) throws Exception {
         Matcher match = Pattern.compile("^" + EPISODE_PREFIX + "(\\d+):(\\d+)$").matcher(reference.trim());
         if (!match.matches()) throw new IOException("Invalid episode reference");
         String id = match.group(1);
@@ -138,8 +183,25 @@ final class Huangguo {
         Page result = get(path, html -> html.contains("id=\"videoInitialData\""));
         String url = videoData(result.html).optJSONObject("epPlaySrcs") == null ? ""
                 : videoData(result.html).optJSONObject("epPlaySrcs").optString(String.valueOf(episode), "");
-        if (url.isEmpty()) throw new IOException("Episode not found");
-        return url;
+        if (!url.isEmpty()) return new EpisodeSource(url, result.origin, "", "", "");
+        Page playback = get("/api/videos/" + id + "/episodes/" + episode + "/playback", body -> {
+            try {
+                JSONObject response = new JSONObject(body);
+                JSONObject data = response.optJSONObject("data");
+                JSONObject streams = data == null ? null : data.optJSONObject("streams");
+                return response.optInt("status") == 1 && data != null
+                        && "GET".equals(data.optString("manifest_method"))
+                        && streams != null && !streams.optString("main").isEmpty();
+            } catch (org.json.JSONException error) {
+                return false;
+            }
+        }, true);
+        JSONObject data = new JSONObject(playback.html).getJSONObject("data");
+        JSONObject cdn = data.optJSONObject("cdn");
+        boolean enabled = cdn != null && cdn.optBoolean("m3u8Enabled");
+        return new EpisodeSource(data.getJSONObject("streams").getString("main"), playback.origin,
+                enabled ? cdn.optString("authKey") : "", enabled ? cdn.optString("authValue") : "",
+                enabled ? cdn.optString("app") : "");
     }
 
     /** Downloads a cover image and decrypts it when the site served it encrypted. */
@@ -226,13 +288,19 @@ final class Huangguo {
 
     // Tries the last working origin, then every route; if all fail, re-reads the portal once.
     private static Page get(String path, Validator validator) throws IOException {
+        return get(path, validator, false);
+    }
+
+    private static Page get(String path, Validator validator, boolean post) throws IOException {
         Set<String> tried = new LinkedHashSet<>();
         IOException failure = new IOException("AI黃果 is unreachable");
         for (boolean refresh : new boolean[]{false, true}) {
             for (String origin : origins(refresh)) {
                 if (!tried.add(origin)) continue;
                 try {
-                    String html = fetchText(origin + path);
+                    String html = post
+                            ? new String(fetchBytes(origin + path, true), StandardCharsets.UTF_8)
+                            : fetchText(origin + path);
                     if (validator.ok(html)) {
                         synchronized (LOCK) {
                             goodOrigin = origin;
@@ -253,6 +321,10 @@ final class Huangguo {
     }
 
     private static byte[] fetchBytes(String url) throws IOException {
+        return fetchBytes(url, false);
+    }
+
+    private static byte[] fetchBytes(String url, boolean post) throws IOException {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(url).openConnection();
@@ -261,6 +333,18 @@ final class Huangguo {
             connection.setInstanceFollowRedirects(true);
             connection.setRequestProperty("User-Agent", UA);
             connection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
+            if (post) {
+                URL target = new URL(url);
+                String origin = target.getProtocol() + "://" + target.getAuthority();
+                connection.setRequestMethod("POST");
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("Origin", origin);
+                connection.setRequestProperty("Referer", origin + "/");
+                connection.setDoOutput(true);
+                try (java.io.OutputStream output = connection.getOutputStream()) {
+                    output.write("{}".getBytes(StandardCharsets.UTF_8));
+                }
+            }
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) throw new IOException("AI黃果 returned HTTP " + status);
             try (InputStream stream = connection.getInputStream();
